@@ -1,4 +1,15 @@
 import { useState, useEffect } from 'react';
+import { 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot,
+  query,
+  orderBy 
+} from 'firebase/firestore';
+import { db } from './firebase';
 import { Service, Stylist, Appointment, Customer, Promotion, Package, GalleryImage, Feedback } from '@/types/spa';
 
 interface Subscriber {
@@ -15,58 +26,158 @@ class DataStore {
   private galleryImages: GalleryImage[] = [];
   private feedback: Feedback[] = [];
   private subscribers: Set<Subscriber> = new Set();
+  private unsubscribeFunctions: (() => void)[] = [];
 
   constructor() {
-    // Load data from localStorage on initialization
-    this.loadFromStorage();
+    // Start real-time listeners on initialization
+    this.startRealtimeListeners();
   }
 
-  private loadFromStorage() {
+  private startRealtimeListeners() {
     try {
-      const savedServices = localStorage.getItem('spa-services');
-      const savedStylists = localStorage.getItem('spa-stylists');
-      const savedAppointments = localStorage.getItem('spa-appointments');
-      const savedCustomers = localStorage.getItem('spa-customers');
-      const savedPromotions = localStorage.getItem('spa-promotions');
-      const savedPackages = localStorage.getItem('spa-packages');
-      const savedGalleryImages = localStorage.getItem('spa-gallery');
-      const savedFeedback = localStorage.getItem('spa-feedback');
+      this.listenToServicesInRealtime();
+      this.listenToStylistsInRealtime();
+      this.listenToAppointmentsInRealtime();
+      this.listenToCustomersInRealtime();
+      this.listenToPromotionsInRealtime();
+      this.listenToPackagesInRealtime();
+      this.listenToGalleryImagesInRealtime();
+      this.listenToFeedbackInRealtime();
 
-      if (savedServices) this.services = JSON.parse(savedServices);
-      if (savedStylists) this.stylists = JSON.parse(savedStylists);
-      if (savedAppointments) this.appointments = JSON.parse(savedAppointments);
-      if (savedCustomers) this.customers = JSON.parse(savedCustomers);
-      if (savedPromotions) this.promotions = JSON.parse(savedPromotions);
-      if (savedPackages) this.packages = JSON.parse(savedPackages);
-      if (savedGalleryImages) this.galleryImages = JSON.parse(savedGalleryImages);
-      if (savedFeedback) this.feedback = JSON.parse(savedFeedback);
-
-      console.log('DataStore: Loaded from localStorage');
-      console.log('Services:', this.services.length);
-      console.log('Stylists:', this.stylists.length);
-      console.log('Appointments:', this.appointments.length);
-      console.log('Promotions:', this.promotions.length);
-      console.log('Gallery:', this.galleryImages.length);
-      console.log('Feedback:', this.feedback.length);
+      console.log('DataStore: Started real-time listeners');
     } catch (error) {
-      console.error('Error loading from localStorage:', error);
+      console.error('Error starting real-time listeners:', error);
     }
   }
 
-  private saveToStorage() {
-    try {
-      localStorage.setItem('spa-services', JSON.stringify(this.services));
-      localStorage.setItem('spa-stylists', JSON.stringify(this.stylists));
-      localStorage.setItem('spa-appointments', JSON.stringify(this.appointments));
-      localStorage.setItem('spa-customers', JSON.stringify(this.customers));
-      localStorage.setItem('spa-promotions', JSON.stringify(this.promotions));
-      localStorage.setItem('spa-packages', JSON.stringify(this.packages));
-      localStorage.setItem('spa-gallery', JSON.stringify(this.galleryImages));
-      localStorage.setItem('spa-feedback', JSON.stringify(this.feedback));
-      console.log('DataStore: Saved to localStorage');
-    } catch (error) {
-      console.error('Error saving to localStorage:', error);
-    }
+  private listenToServicesInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "services"), (snapshot) => {
+      this.services = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as Service[];
+      console.log('Real-time update - Services:', this.services.length);
+      this.notifySubscribers(); // This updates all components immediately
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToStylistsInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "stylists"), (snapshot) => {
+      this.stylists = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data()
+      })) as Stylist[];
+      console.log('Real-time update - Stylists:', this.stylists.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to stylists:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToAppointmentsInRealtime() {
+    const unsubscribe = onSnapshot(query(collection(db, "appointments"), orderBy("createdAt", "desc")), (snapshot) => {
+      this.appointments = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        dateTime: doc.data().dateTime?.toDate() || new Date(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as Appointment[];
+      console.log('Real-time update - Appointments:', this.appointments.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to appointments:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToCustomersInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "customers"), (snapshot) => {
+      this.customers = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        dateOfBirth: doc.data().dateOfBirth?.toDate() || undefined,
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as Customer[];
+      console.log('Real-time update - Customers:', this.customers.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to customers:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToPromotionsInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "promotions"), (snapshot) => {
+      this.promotions = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        validFrom: doc.data().validFrom?.toDate() || new Date(),
+        validUntil: doc.data().validUntil?.toDate() || new Date(),
+        endDate: doc.data().endDate?.toDate() || new Date(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as Promotion[];
+      console.log('Real-time update - Promotions:', this.promotions.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to promotions:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToPackagesInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "packages"), (snapshot) => {
+      this.packages = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        validUntil: doc.data().validUntil?.toDate() || new Date()
+      })) as Package[];
+      console.log('Real-time update - Packages:', this.packages.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to packages:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToGalleryImagesInRealtime() {
+    const unsubscribe = onSnapshot(collection(db, "gallery"), (snapshot) => {
+      this.galleryImages = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as GalleryImage[];
+      console.log('Real-time update - Gallery:', this.galleryImages.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to gallery images:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  private listenToFeedbackInRealtime() {
+    const unsubscribe = onSnapshot(query(collection(db, "feedback"), orderBy("createdAt", "desc")), (snapshot) => {
+      this.feedback = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as Feedback[];
+      console.log('Real-time update - Feedback:', this.feedback.length);
+      this.notifySubscribers();
+    }, (error) => {
+      console.error('Error listening to feedback:', error);
+    });
+    this.unsubscribeFunctions.push(unsubscribe);
+  }
+
+  // Cleanup method to unsubscribe from all listeners
+  destroy() {
+    this.unsubscribeFunctions.forEach(unsubscribe => unsubscribe());
+    this.unsubscribeFunctions = [];
+    this.subscribers.clear();
+    console.log('DataStore: Cleaned up all listeners');
   }
 
   private notifySubscribers() {
@@ -85,28 +196,37 @@ class DataStore {
     return [...this.services];
   }
 
-  addService(service: Service) {
-    console.log('DataStore: Adding service:', service);
-    this.services.push(service);
-    this.saveToStorage();
-    this.notifySubscribers();
+  // Services added with permanent timestamp
+  async addService(service: Service) {
+    const docRef = await addDoc(collection(db, "services"), {
+      ...service,
+      createdAt: new Date()
+    });
+    // Data saved to Firebase cloud ✅
   }
 
-  updateService(id: string, updates: Partial<Service>) {
+  async updateService(id: string, updates: Partial<Service>) {
     console.log('DataStore: Updating service:', id, updates);
-    const index = this.services.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.services[index] = { ...this.services[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      await updateDoc(doc(db, "services", id), updates);
+      console.log('Service updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating service:', error);
+      throw error;
     }
   }
 
-  deleteService(id: string) {
+  async deleteService(id: string) {
     console.log('DataStore: Deleting service:', id);
-    this.services = this.services.filter(s => s.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "services", id));
+      console.log('Service deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting service:', error);
+      throw error;
+    }
   }
 
   // Stylists
@@ -114,28 +234,41 @@ class DataStore {
     return [...this.stylists];
   }
 
-  addStylist(stylist: Stylist) {
+  async addStylist(stylist: Stylist) {
     console.log('DataStore: Adding stylist:', stylist);
-    this.stylists.push(stylist);
-    this.saveToStorage();
-    this.notifySubscribers();
-  }
-
-  updateStylist(id: string, updates: Partial<Stylist>) {
-    console.log('DataStore: Updating stylist:', id, updates);
-    const index = this.stylists.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.stylists[index] = { ...this.stylists[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "stylists"), stylist);
+      console.log('Stylist added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding stylist:', error);
+      throw error;
     }
   }
 
-  deleteStylist(id: string) {
+  async updateStylist(id: string, updates: Partial<Stylist>) {
+    console.log('DataStore: Updating stylist:', id, updates);
+    try {
+      await updateDoc(doc(db, "stylists", id), updates);
+      console.log('Stylist updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating stylist:', error);
+      throw error;
+    }
+  }
+
+  async deleteStylist(id: string) {
     console.log('DataStore: Deleting stylist:', id);
-    this.stylists = this.stylists.filter(s => s.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "stylists", id));
+      console.log('Stylist deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting stylist:', error);
+      throw error;
+    }
   }
 
   // Appointments
@@ -143,33 +276,48 @@ class DataStore {
     return [...this.appointments];
   }
 
-  addAppointment(appointment: Omit<Appointment, 'id'>) {
+  async addAppointment(appointment: Omit<Appointment, 'id'>) {
     const newAppointment: Appointment = {
       ...appointment,
-      id: Date.now().toString(),
+      id: '', // Will be set by Firestore
     };
     console.log('DataStore: Adding appointment:', newAppointment);
-    this.appointments.push(newAppointment);
-    this.saveToStorage();
-    this.notifySubscribers();
-    return newAppointment;
-  }
-
-  updateAppointment(id: string, updates: Partial<Appointment>) {
-    console.log('DataStore: Updating appointment:', id, updates);
-    const index = this.appointments.findIndex(a => a.id === id);
-    if (index !== -1) {
-      this.appointments[index] = { ...this.appointments[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "appointments"), {
+        ...newAppointment,
+        createdAt: new Date()
+      });
+      console.log('Appointment added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return { ...newAppointment, id: docRef.id };
+    } catch (error) {
+      console.error('Error adding appointment:', error);
+      throw error;
     }
   }
 
-  deleteAppointment(id: string) {
+  async updateAppointment(id: string, updates: Partial<Appointment>) {
+    console.log('DataStore: Updating appointment:', id, updates);
+    try {
+      await updateDoc(doc(db, "appointments", id), updates);
+      console.log('Appointment updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating appointment:', error);
+      throw error;
+    }
+  }
+
+  async deleteAppointment(id: string) {
     console.log('DataStore: Deleting appointment:', id);
-    this.appointments = this.appointments.filter(a => a.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "appointments", id));
+      console.log('Appointment deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting appointment:', error);
+      throw error;
+    }
   }
 
   // Customers
@@ -177,11 +325,20 @@ class DataStore {
     return [...this.customers];
   }
 
-  addCustomer(customer: Customer) {
+  async addCustomer(customer: Customer) {
     console.log('DataStore: Adding customer:', customer);
-    this.customers.push(customer);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "customers"), {
+        ...customer,
+        createdAt: new Date()
+      });
+      console.log('Customer added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      throw error;
+    }
   }
 
   // Promotions
@@ -189,28 +346,44 @@ class DataStore {
     return [...this.promotions];
   }
 
-  addPromotion(promotion: Promotion) {
+  async addPromotion(promotion: Promotion) {
     console.log('DataStore: Adding promotion:', promotion);
-    this.promotions.push(promotion);
-    this.saveToStorage();
-    this.notifySubscribers();
-  }
-
-  updatePromotion(id: string, updates: Partial<Promotion>) {
-    console.log('DataStore: Updating promotion:', id, updates);
-    const index = this.promotions.findIndex(p => p.id === id);
-    if (index !== -1) {
-      this.promotions[index] = { ...this.promotions[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "promotions"), {
+        ...promotion,
+        createdAt: new Date()
+      });
+      console.log('Promotion added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding promotion:', error);
+      throw error;
     }
   }
 
-  deletePromotion(id: string) {
+  async updatePromotion(id: string, updates: Partial<Promotion>) {
+    console.log('DataStore: Updating promotion:', id, updates);
+    try {
+      await updateDoc(doc(db, "promotions", id), updates);
+      console.log('Promotion updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating promotion:', error);
+      throw error;
+    }
+  }
+
+  async deletePromotion(id: string) {
     console.log('DataStore: Deleting promotion:', id);
-    this.promotions = this.promotions.filter(p => p.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "promotions", id));
+      console.log('Promotion deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting promotion:', error);
+      throw error;
+    }
   }
 
   // Packages
@@ -218,28 +391,41 @@ class DataStore {
     return [...this.packages];
   }
 
-  addPackage(packageItem: Package) {
+  async addPackage(packageItem: Package) {
     console.log('DataStore: Adding package:', packageItem);
-    this.packages.push(packageItem);
-    this.saveToStorage();
-    this.notifySubscribers();
-  }
-
-  updatePackage(id: string, updates: Partial<Package>) {
-    console.log('DataStore: Updating package:', id, updates);
-    const index = this.packages.findIndex(p => p.id === id);
-    if (index !== -1) {
-      this.packages[index] = { ...this.packages[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "packages"), packageItem);
+      console.log('Package added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding package:', error);
+      throw error;
     }
   }
 
-  deletePackage(id: string) {
+  async updatePackage(id: string, updates: Partial<Package>) {
+    console.log('DataStore: Updating package:', id, updates);
+    try {
+      await updateDoc(doc(db, "packages", id), updates);
+      console.log('Package updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating package:', error);
+      throw error;
+    }
+  }
+
+  async deletePackage(id: string) {
     console.log('DataStore: Deleting package:', id);
-    this.packages = this.packages.filter(p => p.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "packages", id));
+      console.log('Package deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting package:', error);
+      throw error;
+    }
   }
 
   // Gallery
@@ -247,28 +433,44 @@ class DataStore {
     return [...this.galleryImages];
   }
 
-  addGalleryImage(image: GalleryImage) {
+  async addGalleryImage(image: GalleryImage) {
     console.log('DataStore: Adding gallery image:', image);
-    this.galleryImages.push(image);
-    this.saveToStorage();
-    this.notifySubscribers();
-  }
-
-  updateGalleryImage(id: string, updates: Partial<GalleryImage>) {
-    console.log('DataStore: Updating gallery image:', id, updates);
-    const index = this.galleryImages.findIndex(img => img.id === id);
-    if (index !== -1) {
-      this.galleryImages[index] = { ...this.galleryImages[index], ...updates };
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      const docRef = await addDoc(collection(db, "gallery"), {
+        ...image,
+        createdAt: new Date()
+      });
+      console.log('Gallery image added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return docRef.id;
+    } catch (error) {
+      console.error('Error adding gallery image:', error);
+      throw error;
     }
   }
 
-  deleteGalleryImage(id: string) {
+  async updateGalleryImage(id: string, updates: Partial<GalleryImage>) {
+    console.log('DataStore: Updating gallery image:', id, updates);
+    try {
+      await updateDoc(doc(db, "gallery", id), updates);
+      console.log('Gallery image updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating gallery image:', error);
+      throw error;
+    }
+  }
+
+  async deleteGalleryImage(id: string) {
     console.log('DataStore: Deleting gallery image:', id);
-    this.galleryImages = this.galleryImages.filter(img => img.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "gallery", id));
+      console.log('Gallery image deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting gallery image:', error);
+      throw error;
+    }
   }
 
   // Feedback
@@ -276,46 +478,62 @@ class DataStore {
     return [...this.feedback];
   }
 
-  addFeedback(feedbackData: Omit<Feedback, 'id' | 'createdAt' | 'status'>) {
+  async addFeedback(feedbackData: Omit<Feedback, 'id' | 'createdAt' | 'status'>) {
     const newFeedback: Feedback = {
       ...feedbackData,
-      id: Date.now().toString(),
+      id: '', // Will be set by Firestore
       createdAt: new Date(),
       status: 'new'
     };
     console.log('DataStore: Adding feedback:', newFeedback);
-    this.feedback.push(newFeedback);
-    this.saveToStorage();
-    this.notifySubscribers();
-    return newFeedback;
+    try {
+      const docRef = await addDoc(collection(db, "feedback"), newFeedback);
+      console.log('Feedback added successfully with ID:', docRef.id);
+      // Remove local state manipulation - let real-time listener handle it
+      return { ...newFeedback, id: docRef.id };
+    } catch (error) {
+      console.error('Error adding feedback:', error);
+      throw error;
+    }
   }
 
-  updateFeedbackStatus(id: string, status: 'new' | 'read' | 'responded') {
+  async updateFeedbackStatus(id: string, status: 'new' | 'read' | 'responded') {
     console.log('DataStore: Updating feedback status:', id, status);
-    const index = this.feedback.findIndex(f => f.id === id);
-    if (index !== -1) {
-      this.feedback[index].status = status;
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      await updateDoc(doc(db, "feedback", id), { status });
+      console.log('Feedback status updated successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error updating feedback status:', error);
+      throw error;
     }
   }
 
-  addFeedbackResponse(id: string, response: string) {
+  async addFeedbackResponse(id: string, response: string) {
     console.log('DataStore: Adding feedback response:', id, response);
-    const index = this.feedback.findIndex(f => f.id === id);
-    if (index !== -1) {
-      this.feedback[index].response = response;
-      this.feedback[index].status = 'responded';
-      this.saveToStorage();
-      this.notifySubscribers();
+    try {
+      await updateDoc(doc(db, "feedback", id), { 
+        response, 
+        status: 'responded' 
+      });
+      console.log('Feedback response added successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error adding feedback response:', error);
+      throw error;
     }
   }
 
-  deleteFeedback(id: string) {
+  async deleteFeedback(id: string) {
     console.log('DataStore: Deleting feedback:', id);
-    this.feedback = this.feedback.filter(f => f.id !== id);
-    this.saveToStorage();
-    this.notifySubscribers();
+    try {
+      await deleteDoc(doc(db, "feedback", id));
+      console.log('Feedback deleted successfully');
+      // Remove local state manipulation - let real-time listener handle it
+    } catch (error) {
+      console.error('Error deleting feedback:', error);
+      throw error;
+    }
   }
 }
 
